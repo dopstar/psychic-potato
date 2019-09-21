@@ -1,10 +1,87 @@
-bluez (5.43-2+deb9u1) stretch-security; urgency=high
+bluez (5.50-1) unstable; urgency=medium
 
-  * Non-maintainer upload by the Security Team.
+  * Update to 5.50.
+  * Fixed the version to be deleted of the conf file. (Closes: #877482)
+  * Add more details to change the default "Name" of device in main.conf
+    (Closes: #904212)
+    Add patches/main.conf-Add-more-details-Closes-904212.patch
+
+ -- Nobuhiro Iwamatsu <iwamatsu@debian.org>  Sun, 29 Jul 2018 11:46:24 +0900
+
+bluez (5.49-4) unstable; urgency=medium
+
+  * Change team mail address.
+
+ -- Nobuhiro Iwamatsu <iwamatsu@debian.org>  Wed, 23 May 2018 12:36:15 +0900
+
+bluez (5.49-3) unstable; urgency=medium
+
+  * Fix syntax error in bluez preinst script. (Closes: #899340)
+
+ -- Nobuhiro Iwamatsu <iwamatsu@debian.org>  Wed, 23 May 2018 11:35:59 +0900
+
+bluez (5.49-2) unstable; urgency=medium
+
+  * Fix bluetoothd segfault in btd_adv_manager_refresh() (Closes: #898201)
+    Add patches/adapter-Fix-accessing-NULL-adv_manager.patch. 
+    Cherry-picked from 37a30b5435a45c3f8e233309fc70fc7de92b2e76.
+  * Fix segfault after PIN entry. (Closes: #884663)
+    Add patches/shared-gatt-client-Fix-segfault-after-PIN-entry.patch.
+  * Remove obsolete conf file by bluez.preinst. (Closes: #877482)
+
+ -- Nobuhiro Iwamatsu <iwamatsu@debian.org>  Wed, 23 May 2018 08:29:05 +0900
+
+bluez (5.49-1) unstable; urgency=medium
+
+  * Update to 5.49.
+  * Remove patches/0002-autopair-Don-t-handle-the-iCade.patch.
+    This patch was applied to upstream.
+  * Add patches/Fix-typo.patch.
+  * Remove libbluetooth3-dbg and bluez-dbg.
+  * Remove dh-systemd from B-D.
+  * Bump Standards-Version to 4.1.3.
+  * Change Vcs-Browser and Vcs-Git to salsa.
+  * Update manpages (Closes: #867948).
+  * Remove dh-autoreconf and autotools-dev from B-D.
+
+ -- Nobuhiro Iwamatsu <iwamatsu@debian.org>  Mon, 19 Mar 2018 09:24:02 +0900
+
+bluez (5.47-1) unstable; urgency=medium
+
+  * Update to 5.47. (Closes: #876849)
+  * Update debian/control.
+    - Bump Standards-Version to 4.1.0.
+    - Update to debhelper 10.
+    - Remove dh-systemd, autotools-dev and dh-autoreconf from B-D.
+  * Remove patches/fix_udevadm_in_hid2hci.patch.
+  * Remove patches/CVE-2017-1000250.patch.
+  * Remove profiles/proximity/proximity.conf from debian/bluez.install.
+  * Remove copyrtight of alert, cyclingspeed, heartrate and proximity.
+  * Fix missing-call-to-dpkg-maintscript-helper in bluez.
+
+ -- Nobuhiro Iwamatsu <iwamatsu@debian.org>  Fri, 22 Sep 2017 12:10:14 +0900
+
+bluez (5.46-1) unstable; urgency=medium
+
   * CVE-2017-1000250: information disclosure vulnerability in
     service_search_attr_req (Closes: #875633)
+    Add patches/CVE-2017-1000250.patch. Thanks to Salvatore Bonaccorso.
 
- -- Salvatore Bonaccorso <carnil@debian.org>  Wed, 13 Sep 2017 09:16:27 +0200
+ -- Nobuhiro Iwamatsu <iwamatsu@debian.org>  Sat, 29 Jul 2017 04:56:04 +0900
+
+bluez (5.45-1) unstable; urgency=medium
+
+  * Update to 5.45.
+  * Change VCS from svn to git.
+  * Update debian/control.
+    - Add libasound2-dev to B-D.
+    - Add libdw-dev to B-D.
+    - Update Vcs-Browser and Vcs-Git field.
+  * Remove debian/patches/fix-typo-in-src-main.conf.patch
+  * Update debian/patches/main.conf.patch
+
+
+ -- Nobuhiro Iwamatsu <iwamatsu@debian.org>  Sun, 02 Jul 2017 09:07:00 +0900
 
 bluez (5.43-2) unstable; urgency=medium
 
@@ -301,7 +378,7 @@ bluez (4.97-1) experimental; urgency=low
   * Update debian/contorl.
     - Add check (>= 0.9.8-1.1) to Build-Depends.
   * Update debian/rules.
-    - Remove --enable-attrib, --enable-udevrules and --enable-configfiles 
+    - Remove --enable-attrib, --enable-udevrules and --enable-configfiles
       from configure.
     - Add --enable-time, --enable-alert and --enable-gatt-example to
       configure.
@@ -398,7 +475,7 @@ bluez (4.94-1) unstable; urgency=medium
 
 bluez (4.93-3) unstable; urgency=low
 
-  * Fix install hid2hci to /lib/udev. 
+  * Fix install hid2hci to /lib/udev.
 
  -- Nobuhiro Iwamatsu <iwamatsu@debian.org>  Tue, 31 May 2011 19:42:33 +0900
 
@@ -503,7 +580,7 @@ bluez (4.70-1) unstable; urgency=low
     - python-gobject and python-dbus move from Suggests to Depends.
   * Replase bluetooth-agent to bluez-simple-agent.
   * Some test program move to usr/bin.
- 
+
  -- Nobuhiro Iwamatsu <iwamatsu@debian.org>  Fri, 03 Sep 2010 08:43:02 +0900
 
 bluez (4.69-1) unstable; urgency=low
@@ -519,7 +596,7 @@ bluez (4.66-1) unstable; urgency=low
 
   * New upstream release.
   * Update debian/control.
-    - Add libcap-ng-dev to Build-depends. 
+    - Add libcap-ng-dev to Build-depends.
   * Update debian/rules.
     - Add serial.conf (Closes: #559672).
     - Update configure option.
@@ -634,8 +711,8 @@ bluez (4.42-1) unstable; urgency=low
     (Closes: #532622)
   * debian/patches/002_test_agent_newapi.patch port bluetooth-agent to new
     D-Bus API
-  * Update to S-V 3.8.2: no changes  
-  * Introduce common SSD_OPTIONS in init script and sleep 1 on restart 
+  * Update to S-V 3.8.2: no changes
+  * Introduce common SSD_OPTIONS in init script and sleep 1 on restart
 
  -- Filippo Giunchedi <filippo@debian.org>  Sun, 21 Jun 2009 14:01:04 +0200
 
@@ -663,7 +740,7 @@ bluez (4.34-0exp1) experimental; urgency=low
 
   * First upload of bluez 4.x (Closes: #499529)
     - include parts of the packaging from ubuntu, thanks!
-    - bluez-utils and bluez-libs are now a single source package 
+    - bluez-utils and bluez-libs are now a single source package
     - libbluetooth2 -> libbluetooth3 bump
     - conflict bluez with bluez-utils (<= 3.36-3)
     - update debian/copyright, thanks to Nobuhiro Iwamatsu
@@ -703,7 +780,7 @@ bluez (4.29-0ubuntu1) jaunty; urgency=low
     - Fix handling of changed combination keys.
     - Fix handling of link keys when using no bonding.
     - Fix handling of invalid/unknown authentication requirements.
-    - Fix closing of L2CAP raw socket used for dedicated bonding. 
+    - Fix closing of L2CAP raw socket used for dedicated bonding.
 
  -- Baptiste Mille-Mathias <baptiste.millemathias@gmail.com>  Sun, 08 Feb 2009 10:48:36 +0100
 
@@ -738,7 +815,7 @@ bluez (4.25-0ubuntu6) jaunty; urgency=low
 bluez (4.25-0ubuntu5) jaunty; urgency=low
 
   * debian/patches/ubuntu_dbus_policy.patch:
-    - Drop send_interface allow which isn't service-specific.  LP: #318740. 
+    - Drop send_interface allow which isn't service-specific.  LP: #318740.
 
  -- Scott James Remnant <scott@ubuntu.com>  Mon, 19 Jan 2009 15:38:43 +0000
 
@@ -827,7 +904,7 @@ bluez (4.12-0ubuntu2) intrepid; urgency=low
   * debian/control:
     - Move libbluetooth3 to the top of the list so that it is the
       package that gets to keep the real changelog rather than symlinks.
-    - Only Replaces: packages rather than conflicts to help with 
+    - Only Replaces: packages rather than conflicts to help with
       upgrades (LP: #279954)
 
  -- Mario Limonciello <mario_limonciello@dell.com>  Tue, 07 Oct 2008 16:32:31 -0500
@@ -838,7 +915,7 @@ bluez (4.12-0ubuntu1) intrepid; urgency=low
     - This package replaces bluez-utils and bluez-libs source packages.
     - It was generated by merging the contents of bluez-utils and bluez-libs
       and updating content.
-    - Legacy functionality for hidd, dund, and pand are not present, and 
+    - Legacy functionality for hidd, dund, and pand are not present, and
       have been removed from all configuration files.
   * This release introduces encryption (LP: #182191)
   * debian/patches:
