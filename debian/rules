@@ -1,6 +1,4 @@
 #!/usr/bin/make -f
-# Uncomment this to turn on verbose mode.
-#export DH_VERBOSE=1
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 CONFIGURE_FLAGS := \
@@ -10,15 +8,11 @@ CONFIGURE_FLAGS := \
 	--enable-static \
 	--enable-tools \
 	--enable-cups \
-	--enable-midi	\
 	--enable-datafiles \
-	--enable-threads \
 	--enable-backtrace \
 	--enable-debug \
 	--enable-library \
 	--enable-test \
-	--enable-nfc \
-	--enable-sap \
 	--enable-monitor \
 	--enable-udev \
 	--enable-obex \
@@ -28,13 +22,13 @@ CONFIGURE_FLAGS := \
 	--enable-threads \
 	--enable-sixaxis \
 	--enable-deprecated \
-	--enable-health \
 	--enable-experimental
 
 %:
 	dh $@ --with systemd,autoreconf
 
 override_dh_install:
+	cp -r debian/bluez debian/tmp
 	rm -rf  debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libbluetooth.la
 	rm -rf  debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/plugins/sixaxis.la
 
