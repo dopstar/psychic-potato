@@ -1,0 +1,18 @@
+Package: python3-gi
+Source: pygobject
+Version: 3.22.0-2
+Architecture: armhf
+Maintainer: Debian GNOME Maintainers <pkg-gnome-maintainers@lists.alioth.debian.org>
+Installed-Size: 814
+Depends: python3 (<< 3.6), python3 (>= 3.5~), python3:any (>= 3.3.2-2~), libc6 (>= 2.4), libffi6 (>= 3.0.4), libgirepository-1.0-1 (>= 1.44.0), libglib2.0-0 (>= 2.41.1), gir1.2-glib-2.0 (>= 1.39.0)
+Section: python
+Priority: optional
+Homepage: https://wiki.gnome.org/Projects/PyGObject
+Description: Python 3 bindings for gobject-introspection libraries
+ GObject is an abstraction layer that allows programming with an object
+ paradigm that is compatible with many languages. It is a part of Glib,
+ the core library used to build GTK+ and GNOME.
+ .
+ This package contains the Python 3 binding generator for libraries that
+ support gobject-introspection, i. e. which ship a gir1.2-<name>-<version>
+ package. With these packages, the libraries can be used from Python 3.
