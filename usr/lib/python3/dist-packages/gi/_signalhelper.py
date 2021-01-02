@@ -17,17 +17,7 @@
 # You should have received a copy of the GNU Lesser General Public
 # License along with this library; if not, see <http://www.gnu.org/licenses/>.
 
-import sys
-
-from ._gi import _gobject
-
-# Callable went away in python 3.0 and came back in 3.2.
-# Use versioning to figure out when to define it, otherwise we have to deal with
-# the complexity of using __builtin__ or builtin between python versions to
-# check if callable exists which PyFlakes will also complain about.
-if (3, 0) <= sys.version_info < (3, 2):
-    def callable(fn):
-        return hasattr(fn, '__call__')
+from . import _gi
 
 
 class Signal(str):
@@ -115,7 +105,7 @@ class Signal(str):
 
         def disconnect(self, handler_id):
             """Same as GObject.Object.disconnect."""
-            self.instance.disconnect(handler_id)
+            self.gobj.disconnect(handler_id)
 
         def emit(self, *args, **kargs):
             """Same as GObject.Object.emit except there is no need to specify
@@ -127,13 +117,11 @@ class Signal(str):
             name = name.__name__
         return str.__new__(cls, name)
 
-    def __init__(self, name='', func=None, flags=_gobject.SIGNAL_RUN_FIRST,
+    def __init__(self, name='', func=None, flags=_gi.SIGNAL_RUN_FIRST,
                  return_type=None, arg_types=None, doc='', accumulator=None, accu_data=None):
-        if func and not name:
-            name = func.__name__
-        elif callable(name):
+        if func is None and callable(name):
             func = name
-            name = func.__name__
+
         if func and not doc:
             doc = func.__doc__
 
@@ -164,7 +152,7 @@ class Signal(str):
 
         # If obj is a GObject, than we call this signal as a closure otherwise
         # it is used as a re-application of a decorator.
-        if isinstance(obj, _gobject.GObject):
+        if isinstance(obj, _gi.GObject):
             self.func(obj, *args, **kargs)
         else:
             # If self is already an allocated name, use it otherwise create a new named
@@ -180,8 +168,7 @@ class Signal(str):
 
     def copy(self, newName=None):
         """Returns a renamed copy of the Signal."""
-        if newName is None:
-            newName = self.name
+
         return type(self)(name=newName, func=self.func, flags=self.flags,
                           return_type=self.return_type, arg_types=self.arg_types,
                           doc=self.__doc__, accumulator=self.accumulator, accu_data=self.accu_data)

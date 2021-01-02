@@ -1,3 +1,4 @@
+import functools
 import types
 import warnings
 import importlib
@@ -17,14 +18,6 @@ __path__ = extend_path(__path__, __name__)
 
 # namespace -> (attr, replacement)
 _deprecated_attrs = {}
-
-
-def wraps(wrapped):
-    def assign(wrapper):
-        wrapper.__name__ = wrapped.__name__
-        wrapper.__module__ = wrapped.__module__
-        return wrapper
-    return assign
 
 
 class OverridesProxyModule(types.ModuleType):
@@ -165,20 +158,6 @@ def load_overrides(introspection_module):
     return proxy
 
 
-class overridefunc(object):
-    """decorator for overriding a function"""
-    def __init__(self, func):
-        if not isinstance(func, CallableInfo):
-            raise TypeError("func must be a gi function, got %s" % func)
-
-        module_name = func.__module__.rsplit('.', 1)[-1]
-        self.module = sys.modules["gi.repository." + module_name]
-
-    def __call__(self, func):
-        setattr(self.module, func.__name__, func)
-        return func
-
-
 def override(type_):
     """Decorator for registering an override.
 
@@ -187,8 +166,18 @@ def override(type_):
     for example), so they have to be added to the module immediately.
     """
 
-    if isinstance(type_, (types.FunctionType, CallableInfo)):
-        return overridefunc(type_)
+    if isinstance(type_, CallableInfo):
+        func = type_
+        namespace = func.__module__.rsplit('.', 1)[-1]
+        module = sys.modules["gi.repository." + namespace]
+
+        def wrapper(func):
+            setattr(module, func.__name__, func)
+            return func
+
+        return wrapper
+    elif isinstance(type_, types.FunctionType):
+        raise TypeError("func must be a gi function, got %s" % type_)
     else:
         try:
             info = getattr(type_, '__info__')
@@ -214,9 +203,13 @@ def override(type_):
         return type_
 
 
+overridefunc = override
+"""Deprecated"""
+
+
 def deprecated(fn, replacement):
     """Decorator for marking methods and classes as deprecated"""
-    @wraps(fn)
+    @functools.wraps(fn)
     def wrapped(*args, **kwargs):
         warnings.warn('%s is deprecated; use %s instead' % (fn.__name__, replacement),
                       PyGIDeprecationWarning, stacklevel=2)
@@ -335,7 +328,7 @@ def strip_boolean_result(method, exc_type=None, exc_str=None, fail_ret=None):
     several out arguments. Translate such a method to return the out arguments
     on success and None on failure.
     """
-    @wraps(method)
+    @functools.wraps(method)
     def wrapped(*args, **kwargs):
         ret = method(*args, **kwargs)
         if ret[0]:

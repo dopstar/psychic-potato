@@ -17,12 +17,7 @@
 # You should have received a copy of the GNU Lesser General Public
 # License along with this library; if not, see <http://www.gnu.org/licenses/>.
 
-import sys
-import traceback
-
-import gi._gi
-_gobject = gi._gi._gobject
-
+from . import _gi
 from ._constants import \
     TYPE_NONE, TYPE_INTERFACE, TYPE_CHAR, TYPE_UCHAR, \
     TYPE_BOOLEAN, TYPE_INT, TYPE_UINT, TYPE_LONG, \
@@ -31,21 +26,14 @@ from ._constants import \
     TYPE_POINTER, TYPE_BOXED, TYPE_PARAM, TYPE_OBJECT, \
     TYPE_PYOBJECT, TYPE_GTYPE, TYPE_STRV, TYPE_VARIANT
 
-G_MAXFLOAT = _gobject.G_MAXFLOAT
-G_MAXDOUBLE = _gobject.G_MAXDOUBLE
-G_MININT = _gobject.G_MININT
-G_MAXINT = _gobject.G_MAXINT
-G_MAXUINT = _gobject.G_MAXUINT
-G_MINLONG = _gobject.G_MINLONG
-G_MAXLONG = _gobject.G_MAXLONG
-G_MAXULONG = _gobject.G_MAXULONG
-
-if sys.version_info >= (3, 0):
-    _basestring = str
-    _long = int
-else:
-    _basestring = basestring
-    _long = long
+G_MAXFLOAT = _gi.G_MAXFLOAT
+G_MAXDOUBLE = _gi.G_MAXDOUBLE
+G_MININT = _gi.G_MININT
+G_MAXINT = _gi.G_MAXINT
+G_MAXUINT = _gi.G_MAXUINT
+G_MINLONG = _gi.G_MINLONG
+G_MAXLONG = _gi.G_MAXLONG
+G_MAXULONG = _gi.G_MAXULONG
 
 
 class Property(object):
@@ -104,8 +92,6 @@ class Property(object):
                 self.value = value
     """
     _type_from_pytype_lookup = {
-        # Put long_ first in case long_ and int are the same so int clobbers long_
-        _long: TYPE_LONG,
         int: TYPE_INT,
         bool: TYPE_BOOLEAN,
         float: TYPE_DOUBLE,
@@ -153,7 +139,7 @@ class Property(object):
             return "<class 'GObject.Property'>"
 
     def __init__(self, getter=None, setter=None, type=None, default=None,
-                 nick='', blurb='', flags=_gobject.PARAM_READWRITE,
+                 nick='', blurb='', flags=_gi.PARAM_READWRITE,
                  minimum=None, maximum=None):
         self.name = None
 
@@ -163,11 +149,11 @@ class Property(object):
         self.default = self._get_default(default)
         self._check_default()
 
-        if not isinstance(nick, _basestring):
+        if not isinstance(nick, str):
             raise TypeError("nick must be a string")
         self.nick = nick
 
-        if not isinstance(blurb, _basestring):
+        if not isinstance(blurb, str):
             raise TypeError("blurb must be a string")
         self.blurb = blurb
         # Always clobber __doc__ with blurb even if blurb is empty because
@@ -211,26 +197,14 @@ class Property(object):
     def __repr__(self):
         return '<GObject Property %s (%s)>' % (
             self.name or '(uninitialized)',
-            _gobject.type_name(self.type))
+            self.type.name)
 
     def __get__(self, instance, klass):
         if instance is None:
             return self
 
         self._exc = None
-
-        # Simply return the result of fget directly, no need to go through GObject.
-        # See: https://bugzilla.gnome.org/show_bug.cgi?id=723872
-        # We catch and print any exception occurring within the fget for compatibility
-        # prior to the fast path addition from bug 723872, this should eventually
-        # be removed and exceptions raised directly to the caller as in:
-        # https://bugzilla.gnome.org/show_bug.cgi?id=575652
-        try:
-            value = self.fget(instance)
-        except Exception:
-            traceback.print_exc()
-            value = None
-
+        value = self.fget(instance)
         if self._exc:
             exc = self._exc
             self._exc = None
@@ -276,11 +250,11 @@ class Property(object):
         if type_ in self._type_from_pytype_lookup:
             return self._type_from_pytype_lookup[type_]
         elif (isinstance(type_, type) and
-              issubclass(type_, (_gobject.GObject,
-                                 _gobject.GEnum,
-                                 _gobject.GFlags,
-                                 _gobject.GBoxed,
-                                 _gobject.GInterface))):
+              issubclass(type_, (_gi.GObject,
+                                 _gi.GEnum,
+                                 _gi.GFlags,
+                                 _gi.GBoxed,
+                                 _gi.GInterface))):
             return type_.__gtype__
         elif type_ in (TYPE_NONE, TYPE_INTERFACE, TYPE_CHAR, TYPE_UCHAR,
                        TYPE_INT, TYPE_UINT, TYPE_BOOLEAN, TYPE_LONG,
@@ -309,24 +283,24 @@ class Property(object):
         elif ptype == TYPE_GTYPE:
             if default is not None:
                 raise TypeError("GType types does not have default values")
-        elif _gobject.type_is_a(ptype, TYPE_ENUM):
+        elif ptype.is_a(TYPE_ENUM):
             if default is None:
                 raise TypeError("enum properties needs a default value")
-            elif not _gobject.type_is_a(default, ptype):
+            elif not _gi.GType(default).is_a(ptype):
                 raise TypeError("enum value %s must be an instance of %r" %
                                 (default, ptype))
-        elif _gobject.type_is_a(ptype, TYPE_FLAGS):
-            if not _gobject.type_is_a(default, ptype):
+        elif ptype.is_a(TYPE_FLAGS):
+            if not _gi.GType(default).is_a(ptype):
                 raise TypeError("flags value %s must be an instance of %r" %
                                 (default, ptype))
-        elif _gobject.type_is_a(ptype, TYPE_STRV) and default is not None:
+        elif ptype.is_a(TYPE_STRV) and default is not None:
             if not isinstance(default, list):
                 raise TypeError("Strv value %s must be a list" % repr(default))
             for val in default:
                 if type(val) not in (str, bytes):
                     raise TypeError("Strv value %s must contain only strings" % str(default))
-        elif _gobject.type_is_a(ptype, TYPE_VARIANT) and default is not None:
-            if not hasattr(default, '__gtype__') or not _gobject.type_is_a(default, TYPE_VARIANT):
+        elif ptype.is_a(TYPE_VARIANT) and default is not None:
+            if not hasattr(default, '__gtype__') or not _gi.GType(default).is_a(TYPE_VARIANT):
                 raise TypeError("variant value %s must be an instance of %r" %
                                 (default, ptype))
 

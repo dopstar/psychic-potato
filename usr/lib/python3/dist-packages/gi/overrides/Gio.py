@@ -18,8 +18,13 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301
 # USA
 
+import warnings
+
+from .._ossighelper import wakeup_on_signal, register_sigint_fallback
 from ..overrides import override, deprecated_init
 from ..module import get_introspection_module
+from gi._gi import pygobject_new_full
+from gi import PyGIWarning
 
 from gi.repository import GLib
 
@@ -28,6 +33,171 @@ import sys
 Gio = get_introspection_module('Gio')
 
 __all__ = []
+
+
+class Application(Gio.Application):
+
+    def run(self, *args, **kwargs):
+        with register_sigint_fallback(self.quit):
+            with wakeup_on_signal():
+                return Gio.Application.run(self, *args, **kwargs)
+
+
+Application = override(Application)
+__all__.append('Application')
+
+
+def _warn_init(cls, instead=None):
+
+    def new_init(self, *args, **kwargs):
+        super(cls, self).__init__(*args, **kwargs)
+        name = cls.__module__.rsplit(".", 1)[-1] + "." + cls.__name__
+        if instead:
+            warnings.warn(
+                ("%s shouldn't be instantiated directly, "
+                 "use %s instead." % (name, instead)),
+                PyGIWarning, stacklevel=2)
+        else:
+            warnings.warn(
+                "%s shouldn't be instantiated directly." % (name,),
+                PyGIWarning, stacklevel=2)
+
+    return new_init
+
+
+@override
+class VolumeMonitor(Gio.VolumeMonitor):
+    # https://bugzilla.gnome.org/show_bug.cgi?id=744690
+    __init__ = _warn_init(Gio.VolumeMonitor, "Gio.VolumeMonitor.get()")
+
+
+__all__.append('VolumeMonitor')
+
+
+@override
+class DBusAnnotationInfo(Gio.DBusAnnotationInfo):
+    __init__ = _warn_init(Gio.DBusAnnotationInfo)
+
+
+__all__.append('DBusAnnotationInfo')
+
+
+@override
+class DBusArgInfo(Gio.DBusArgInfo):
+    __init__ = _warn_init(Gio.DBusArgInfo)
+
+
+__all__.append('DBusArgInfo')
+
+
+@override
+class DBusMethodInfo(Gio.DBusMethodInfo):
+    __init__ = _warn_init(Gio.DBusMethodInfo)
+
+
+__all__.append('DBusMethodInfo')
+
+
+@override
+class DBusSignalInfo(Gio.DBusSignalInfo):
+    __init__ = _warn_init(Gio.DBusSignalInfo)
+
+
+__all__.append('DBusSignalInfo')
+
+
+@override
+class DBusInterfaceInfo(Gio.DBusInterfaceInfo):
+    __init__ = _warn_init(Gio.DBusInterfaceInfo)
+
+
+__all__.append('DBusInterfaceInfo')
+
+
+@override
+class DBusNodeInfo(Gio.DBusNodeInfo):
+    __init__ = _warn_init(Gio.DBusNodeInfo)
+
+
+__all__.append('DBusNodeInfo')
+
+
+class ActionMap(Gio.ActionMap):
+    def add_action_entries(self, entries, user_data=None):
+        """
+        The add_action_entries() method is a convenience function for creating
+        multiple Gio.SimpleAction instances and adding them to a Gio.ActionMap.
+        Each action is constructed as per one entry.
+
+        :param list entries:
+            List of entry tuples for add_action() method. The entry tuple can
+            vary in size with the following information:
+
+                * The name of the action. Must be specified.
+                * The callback to connect to the "activate" signal of the
+                  action. Since GLib 2.40, this can be None for stateful
+                  actions, in which case the default handler is used. For
+                  boolean-stated actions with no parameter, this is a toggle.
+                  For other state types (and parameter type equal to the state
+                  type) this will be a function that just calls change_state
+                  (which you should provide).
+                * The type of the parameter that must be passed to the activate
+                  function for this action, given as a single GLib.Variant type
+                  string (or None for no parameter)
+                * The initial state for this action, given in GLib.Variant text
+                  format. The state is parsed with no extra type information, so
+                  type tags must be added to the string if they are necessary.
+                  Stateless actions should give None here.
+                * The callback to connect to the "change-state" signal of the
+                  action. All stateful actions should provide a handler here;
+                  stateless actions should not.
+
+        :param user_data:
+            The user data for signal connections, or None
+        """
+        try:
+            iter(entries)
+        except (TypeError):
+            raise TypeError('entries must be iterable')
+
+        def _process_action(name, activate=None, parameter_type=None,
+                            state=None, change_state=None):
+            if parameter_type:
+                if not GLib.VariantType.string_is_valid(parameter_type):
+                    raise TypeError("The type string '%s' given as the "
+                                    "parameter type for action '%s' is "
+                                    "not a valid GVariant type string. " %
+                                    (parameter_type, name))
+                variant_parameter = GLib.VariantType.new(parameter_type)
+            else:
+                variant_parameter = None
+
+            if state is not None:
+                # stateful action
+                variant_state = GLib.Variant.parse(None, state, None, None)
+                action = Gio.SimpleAction.new_stateful(name, variant_parameter,
+                                                       variant_state)
+                if change_state is not None:
+                    action.connect('change-state', change_state, user_data)
+            else:
+                # stateless action
+                if change_state is not None:
+                    raise ValueError("Stateless action '%s' should give "
+                                     "None for 'change_state', not '%s'." %
+                                     (name, change_state))
+                action = Gio.SimpleAction(name=name, parameter_type=variant_parameter)
+
+            if activate is not None:
+                action.connect('activate', activate, user_data)
+            self.add_action(action)
+
+        for entry in entries:
+            # using inner function above since entries can leave out optional arguments
+            _process_action(*entry)
+
+
+ActionMap = override(ActionMap)
+__all__.append('ActionMap')
 
 
 class FileEnumerator(Gio.FileEnumerator):
@@ -72,6 +242,10 @@ class Settings(Gio.Settings):
     def __len__(self):
         return len(self.list_keys())
 
+    def __iter__(self):
+        for key in self.list_keys():
+            yield key
+
     def __bool__(self):
         # for "if mysettings" we don't want a dictionary-like test here, just
         # if the object isn't None
@@ -108,6 +282,13 @@ class Settings(Gio.Settings):
             allowed = v.unpack()
             if value not in allowed:
                 raise ValueError('value %s is not an allowed enum (%s)' % (value, allowed))
+        elif type_ == 'range':
+            tuple_ = v.get_child_value(0)
+            type_str = tuple_.get_child_value(0).get_type_string()
+            min_, max_ = tuple_.unpack()
+            if value < min_ or value > max_:
+                raise ValueError(
+                    'value %s not in range (%s - %s)' % (value, min_, max_))
         else:
             raise NotImplementedError('Cannot handle allowed type range class ' + str(type_))
 
@@ -115,6 +296,7 @@ class Settings(Gio.Settings):
 
     def keys(self):
         return self.list_keys()
+
 
 Settings = override(Settings)
 __all__.append('Settings')
@@ -235,5 +417,145 @@ class DBusProxy(Gio.DBusProxy):
     def __getattr__(self, name):
         return _DBusProxyMethodCall(self, name)
 
+
 DBusProxy = override(DBusProxy)
 __all__.append('DBusProxy')
+
+
+class ListModel(Gio.ListModel):
+
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            return [self.get_item(i) for i in range(*key.indices(len(self)))]
+        elif isinstance(key, int):
+            if key < 0:
+                key += len(self)
+            if key < 0:
+                raise IndexError
+            ret = self.get_item(key)
+            if ret is None:
+                raise IndexError
+            return ret
+        else:
+            raise TypeError
+
+    def __contains__(self, item):
+        pytype = self.get_item_type().pytype
+        if not isinstance(item, pytype):
+            raise TypeError(
+                "Expected type %s.%s" % (pytype.__module__, pytype.__name__))
+        for i in self:
+            if i == item:
+                return True
+        return False
+
+    def __len__(self):
+        return self.get_n_items()
+
+    def __iter__(self):
+        for i in range(len(self)):
+            yield self.get_item(i)
+
+
+ListModel = override(ListModel)
+__all__.append('ListModel')
+
+
+def _wrap_list_store_sort_func(func):
+
+    def wrap(a, b, *user_data):
+        a = pygobject_new_full(a, False)
+        b = pygobject_new_full(b, False)
+        return func(a, b, *user_data)
+
+    return wrap
+
+
+if (GLib.MAJOR_VERSION, GLib.MINOR_VERSION, GLib.MICRO_VERSION) < (2, 57, 1):
+    # The "additions" functionality in splice() was broken in older glib
+    # https://bugzilla.gnome.org/show_bug.cgi?id=795307
+    # This is a slower fallback which emits a signal per added item
+    def _list_store_splice(self, position, n_removals, additions):
+        self.splice(position, n_removals, [])
+        for v in reversed(additions):
+            self.insert(position, v)
+else:
+    def _list_store_splice(self, position, n_removals, additions):
+        self.splice(position, n_removals, additions)
+
+
+class ListStore(Gio.ListStore):
+
+    def sort(self, compare_func, *user_data):
+        compare_func = _wrap_list_store_sort_func(compare_func)
+        return super(ListStore, self).sort(compare_func, *user_data)
+
+    def insert_sorted(self, item, compare_func, *user_data):
+        compare_func = _wrap_list_store_sort_func(compare_func)
+        return super(ListStore, self).insert_sorted(
+            item, compare_func, *user_data)
+
+    def __delitem__(self, key):
+        if isinstance(key, slice):
+            start, stop, step = key.indices(len(self))
+            if step == 1:
+                _list_store_splice(self, start, max(stop - start, 0), [])
+            elif step == -1:
+                _list_store_splice(self, stop + 1, max(start - stop, 0), [])
+            else:
+                for i in sorted(range(start, stop, step), reverse=True):
+                    self.remove(i)
+        elif isinstance(key, int):
+            if key < 0:
+                key += len(self)
+            if key < 0 or key >= len(self):
+                raise IndexError
+            self.remove(key)
+        else:
+            raise TypeError
+
+    def __setitem__(self, key, value):
+        if isinstance(key, slice):
+            pytype = self.get_item_type().pytype
+            valuelist = []
+            for v in value:
+                if not isinstance(v, pytype):
+                    raise TypeError(
+                        "Expected type %s.%s" % (
+                            pytype.__module__, pytype.__name__))
+                valuelist.append(v)
+
+            start, stop, step = key.indices(len(self))
+            if step == 1:
+                _list_store_splice(
+                    self, start, max(stop - start, 0), valuelist)
+            else:
+                indices = list(range(start, stop, step))
+                if len(indices) != len(valuelist):
+                    raise ValueError
+
+                if step == -1:
+                    _list_store_splice(
+                        self, stop + 1, max(start - stop, 0), valuelist[::-1])
+                else:
+                    for i, v in zip(indices, valuelist):
+                        _list_store_splice(self, i, 1, [v])
+        elif isinstance(key, int):
+            if key < 0:
+                key += len(self)
+            if key < 0 or key >= len(self):
+                raise IndexError
+
+            pytype = self.get_item_type().pytype
+            if not isinstance(value, pytype):
+                raise TypeError(
+                    "Expected type %s.%s" % (
+                        pytype.__module__, pytype.__name__))
+
+            _list_store_splice(self, key, 1, [value])
+        else:
+            raise TypeError
+
+
+ListStore = override(ListStore)
+__all__.append('ListStore')
