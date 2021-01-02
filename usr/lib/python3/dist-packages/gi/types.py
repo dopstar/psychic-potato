@@ -20,10 +20,7 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301
 # USA
 
-from __future__ import absolute_import
-
-import sys
-import warnings
+import re
 
 from ._constants import TYPE_INVALID
 from .docstring import generate_doc_string
@@ -35,19 +32,18 @@ from ._gi import \
     VFuncInfo, \
     register_interface_info, \
     hook_up_vfunc_implementation, \
-    _gobject
+    GInterface
+from . import _gi
 
-GInterface = _gobject.GInterface
-
-StructInfo  # pyflakes
+StructInfo, GInterface  # pyflakes
 
 from . import _propertyhelper as propertyhelper
 from . import _signalhelper as signalhelper
 
-if (3, 0) <= sys.version_info < (3, 3):
-    # callable not available for python 3.0 thru 3.2
-    def callable(obj):
-        return hasattr(obj, '__call__')
+
+def snake_case(name):
+    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
 
 class MetaClassHelper(object):
@@ -82,6 +78,8 @@ class MetaClassHelper(object):
             if not vfunc_name.startswith("do_") or not callable(py_vfunc):
                 continue
 
+            skip_ambiguity_check = False
+
             # If a method name starts with "do_" assume it is a vfunc, and search
             # in the base classes for a method with the same name to override.
             # Recursion is necessary as overriden methods in most immediate parent
@@ -91,6 +89,20 @@ class MetaClassHelper(object):
                 method = getattr(base, vfunc_name, None)
                 if method is not None and isinstance(method, VFuncInfo):
                     vfunc_info = method
+                    break
+
+                if not hasattr(base, '__info__') or not hasattr(base.__info__, 'get_vfuncs'):
+                    continue
+
+                base_name = snake_case(base.__info__.get_type_name())
+
+                for v in base.__info__.get_vfuncs():
+                    if vfunc_name == 'do_%s_%s' % (base_name, v.get_name()):
+                        vfunc_info = v
+                        skip_ambiguity_check = True
+                        break
+
+                if vfunc_info:
                     break
 
             # If we did not find a matching method name in the bases, we might
@@ -103,22 +115,22 @@ class MetaClassHelper(object):
                 vfunc_info = find_vfunc_info_in_interface(cls.__bases__, vfunc_name[len("do_"):])
 
             if vfunc_info is not None:
-                assert vfunc_name == ('do_' + vfunc_info.get_name())
                 # Check to see if there are vfuncs with the same name in the bases.
                 # We have no way of specifying which one we are supposed to override.
-                ambiguous_base = find_vfunc_conflict_in_bases(vfunc_info, cls.__bases__)
-                if ambiguous_base is not None:
-                    base_info = vfunc_info.get_container()
-                    raise TypeError('Method %s() on class %s.%s is ambiguous '
-                                    'with methods in base classes %s.%s and %s.%s' %
-                                    (vfunc_name,
-                                     cls.__info__.get_namespace(),
-                                     cls.__info__.get_name(),
-                                     base_info.get_namespace(),
-                                     base_info.get_name(),
-                                     ambiguous_base.__info__.get_namespace(),
-                                     ambiguous_base.__info__.get_name()
-                                    ))
+                if not skip_ambiguity_check:
+                    ambiguous_base = find_vfunc_conflict_in_bases(vfunc_info, cls.__bases__)
+                    if ambiguous_base is not None:
+                        base_info = vfunc_info.get_container()
+                        raise TypeError('Method %s() on class %s.%s is ambiguous '
+                                        'with methods in base classes %s.%s and %s.%s' %
+                                        (vfunc_name,
+                                         cls.__info__.get_namespace(),
+                                         cls.__info__.get_name(),
+                                         base_info.get_namespace(),
+                                         base_info.get_name(),
+                                         ambiguous_base.__info__.get_namespace(),
+                                         ambiguous_base.__info__.get_name()
+                                        ))
                 hook_up_vfunc_implementation(vfunc_info, cls.__gtype__,
                                              py_vfunc)
 
@@ -147,7 +159,7 @@ def find_vfunc_info_in_interface(bases, vfunc_name):
         # This can be seen in IntrospectionModule.__getattr__() in module.py.
         # We do not need to search regular classes here, only wrapped interfaces.
         # We also skip GInterface, because it is not wrapped and has no __info__ attr.
-        # Skip bases without __info__ (static _gobject._gobject.GObject)
+        # Skip bases without __info__ (static _gi.GObject)
         if base is GInterface or\
                 not issubclass(base, GInterface) or\
                 not hasattr(base, '__info__'):
@@ -202,9 +214,10 @@ class _GObjectMetaBase(type):
         if cls.__module__.startswith('gi.overrides.'):
             return
 
-        _gobject.type_register(cls, namespace.get('__gtype_name__'))
+        _gi.type_register(cls, namespace.get('__gtype_name__'))
 
-_gobject._install_metaclass(_GObjectMetaBase)
+
+_gi._install_metaclass(_GObjectMetaBase)
 
 
 class GObjectMeta(_GObjectMetaBase, MetaClassHelper):
@@ -274,19 +287,7 @@ def mro(C):
             # in __mro__ at each point. Therefore at this point we know that
             # we already have our base class MRO's available to us, there is
             # no need for us to (re)calculate them.
-            if hasattr(base, '__mro__'):
-                bases_of_subclasses += [list(base.__mro__)]
-            else:
-                warnings.warn('Mixin class %s is an old style class, please '
-                              'update this to derive from "object".' % base,
-                              RuntimeWarning)
-                # For old-style classes (Python2 only), the MRO is not
-                # easily accessible. As we do need it here, we calculate
-                # it via recursion, according to the C3 algorithm. Using C3
-                # for old style classes deviates from Python's own behaviour,
-                # but visible effects here would be a corner case triggered by
-                # questionable design.
-                bases_of_subclasses += [mro(base)]
+            bases_of_subclasses += [list(base.__mro__)]
         bases_of_subclasses += [list(C.__bases__)]
 
     while bases_of_subclasses:

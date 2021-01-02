@@ -18,8 +18,6 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301
 # USA
 
-from __future__ import absolute_import
-
 # support overrides in different directories than our gi module
 from pkgutil import extend_path
 __path__ = extend_path(__path__, __name__)
@@ -40,7 +38,6 @@ if 'gobject' in sys.modules:
 
 
 from . import _gi
-from ._gi import _gobject
 from ._gi import _API
 from ._gi import Repository
 from ._gi import PyGIDeprecationWarning
@@ -53,8 +50,16 @@ PyGIWarning = PyGIWarning
 _versions = {}
 _overridesdir = os.path.join(os.path.dirname(__file__), 'overrides')
 
-version_info = _gobject.pygobject_version[:]
+# Needed for compatibility with "pygobject.h"/pygobject_init()
+_gobject = types.ModuleType("gi._gobject")
+sys.modules[_gobject.__name__] = _gobject
+_gobject._PyGObject_API = _gi._PyGObject_API
+_gobject.pygobject_version = _gi.pygobject_version
+
+version_info = _gi.pygobject_version[:]
 __version__ = "{0}.{1}.{2}".format(*version_info)
+
+_gi.register_foreign()
 
 
 class _DummyStaticModule(types.ModuleType):
@@ -102,6 +107,9 @@ def require_version(namespace, version):
 
     """
     repository = Repository.get_default()
+
+    if not isinstance(version, str):
+        raise ValueError('Namespace version needs to be a string.')
 
     if namespace in repository.get_loaded_namespaces():
         loaded_version = repository.get_version(namespace)

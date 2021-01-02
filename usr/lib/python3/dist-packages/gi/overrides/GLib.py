@@ -19,11 +19,11 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301
 # USA
 
-import signal
 import warnings
 import sys
 import socket
 
+from .._ossighelper import wakeup_on_signal, register_sigint_fallback
 from ..module import get_introspection_module
 from .._gi import (variant_type_from_string, source_new,
                    source_set_callback, io_channel_read)
@@ -40,15 +40,14 @@ __all__.append('option')
 
 
 # Types and functions still needed from static bindings
-from gi._gi import _glib
-from gi._gi import _gobject
+from gi import _gi
 from gi._error import GError
 
 Error = GError
-OptionContext = _glib.OptionContext
-OptionGroup = _glib.OptionGroup
-Pid = _glib.Pid
-spawn_async = _glib.spawn_async
+OptionContext = _gi.OptionContext
+OptionGroup = _gi.OptionGroup
+Pid = _gi.Pid
+spawn_async = _gi.spawn_async
 
 
 def threads_init():
@@ -74,7 +73,7 @@ def gerror_new_literal(domain, message, code):
 
 # Monkey patch methods that rely on GLib introspection to be loaded at runtime.
 Error.__name__ = 'Error'
-Error.__module__ = 'GLib'
+Error.__module__ = 'gi.repository.GLib'
 Error.__gtype__ = GLib.Error.__gtype__
 Error.matches = gerror_matches
 Error.new_literal = staticmethod(gerror_new_literal)
@@ -103,127 +102,72 @@ class _VariantCreator(object):
         'v': GLib.Variant.new_variant,
     }
 
-    def _create(self, format, args):
-        """Create a GVariant object from given format and argument list.
+    def _create(self, format, value):
+        """Create a GVariant object from given format and a value that matches
+        the format.
 
         This method recursively calls itself for complex structures (arrays,
         dictionaries, boxed).
 
-        Return a tuple (variant, rest_format, rest_args) with the generated
-        GVariant, the remainder of the format string, and the remainder of the
-        arguments.
+        Returns the generated GVariant.
 
-        If args is None, then this won't actually consume any arguments, and
-        just parse the format string and generate empty GVariant structures.
-        This is required for creating empty dictionaries or arrays.
+        If value is None it will generate an empty GVariant container type.
         """
-        # leaves (simple types)
-        constructor = self._LEAF_CONSTRUCTORS.get(format[0])
-        if constructor:
-            if args is not None:
-                if not args:
-                    raise TypeError('not enough arguments for GVariant format string')
-                v = constructor(args[0])
-                return (v, format[1:], args[1:])
-            else:
-                return (None, format[1:], None)
+        gvtype = GLib.VariantType(format)
+        if format in self._LEAF_CONSTRUCTORS:
+            return self._LEAF_CONSTRUCTORS[format](value)
 
-        if format[0] == '(':
-            return self._create_tuple(format, args)
+        # Since we discarded all leaf types, this must be a container
+        builder = GLib.VariantBuilder.new(gvtype)
+        if value is None:
+            return builder.end()
 
-        if format.startswith('a{'):
-            return self._create_dict(format, args)
+        if gvtype.is_maybe():
+            builder.add_value(self._create(gvtype.element().dup_string(), value))
+            return builder.end()
 
-        if format[0] == 'a':
-            return self._create_array(format, args)
+        try:
+            iter(value)
+        except TypeError:
+            raise TypeError("Could not create array, tuple or dictionary entry from non iterable value %s %s" %
+                            (format, value))
 
-        raise NotImplementedError('cannot handle GVariant type ' + format)
+        if gvtype.is_tuple() and gvtype.n_items() != len(value):
+            raise TypeError("Tuple mismatches value's number of elements %s %s" % (format, value))
+        if gvtype.is_dict_entry() and len(value) != 2:
+            raise TypeError("Dictionary entries must have two elements %s %s" % (format, value))
 
-    def _create_tuple(self, format, args):
-        """Handle the case where the outermost type of format is a tuple."""
-
-        format = format[1:]  # eat the '('
-        if args is None:
-            # empty value: we need to call _create() to parse the subtype
-            rest_format = format
-            while rest_format:
-                if rest_format.startswith(')'):
-                    break
-                rest_format = self._create(rest_format, None)[1]
-            else:
-                raise TypeError('tuple type string not closed with )')
-
-            rest_format = rest_format[1:]  # eat the )
-            return (None, rest_format, None)
+        if gvtype.is_array():
+            element_type = gvtype.element().dup_string()
+            if isinstance(value, dict):
+                value = value.items()
+            for i in value:
+                builder.add_value(self._create(element_type, i))
         else:
-            if not args or not isinstance(args[0], tuple):
-                raise TypeError('expected tuple argument')
+            remainer_format = format[1:]
+            for i in value:
+                dup = variant_type_from_string(remainer_format).dup_string()
+                builder.add_value(self._create(dup, i))
+                remainer_format = remainer_format[len(dup):]
 
-            builder = GLib.VariantBuilder.new(variant_type_from_string('r'))
-            for i in range(len(args[0])):
-                if format.startswith(')'):
-                    raise TypeError('too many arguments for tuple signature')
+        return builder.end()
 
-                (v, format, _) = self._create(format, args[0][i:])
-                builder.add_value(v)
-            args = args[1:]
-            if not format.startswith(')'):
-                raise TypeError('tuple type string not closed with )')
 
-            rest_format = format[1:]  # eat the )
-            return (builder.end(), rest_format, args)
-
-    def _create_dict(self, format, args):
-        """Handle the case where the outermost type of format is a dict."""
-
-        builder = None
-        if args is None or not args[0]:
-            # empty value: we need to call _create() to parse the subtype,
-            # and specify the element type precisely
-            rest_format = self._create(format[2:], None)[1]
-            rest_format = self._create(rest_format, None)[1]
-            if not rest_format.startswith('}'):
-                raise TypeError('dictionary type string not closed with }')
-            rest_format = rest_format[1:]  # eat the }
-            element_type = format[:len(format) - len(rest_format)]
-            builder = GLib.VariantBuilder.new(variant_type_from_string(element_type))
-        else:
-            builder = GLib.VariantBuilder.new(variant_type_from_string('a{?*}'))
-            for k, v in args[0].items():
-                (key_v, rest_format, _) = self._create(format[2:], [k])
-                (val_v, rest_format, _) = self._create(rest_format, [v])
-
-                if not rest_format.startswith('}'):
-                    raise TypeError('dictionary type string not closed with }')
-                rest_format = rest_format[1:]  # eat the }
-
-                entry = GLib.VariantBuilder.new(variant_type_from_string('{?*}'))
-                entry.add_value(key_v)
-                entry.add_value(val_v)
-                builder.add_value(entry.end())
-
-        if args is not None:
-            args = args[1:]
-        return (builder.end(), rest_format, args)
-
-    def _create_array(self, format, args):
-        """Handle the case where the outermost type of format is an array."""
-
-        builder = None
-        if args is None or not args[0]:
-            # empty value: we need to call _create() to parse the subtype,
-            # and specify the element type precisely
-            rest_format = self._create(format[1:], None)[1]
-            element_type = format[:len(format) - len(rest_format)]
-            builder = GLib.VariantBuilder.new(variant_type_from_string(element_type))
-        else:
-            builder = GLib.VariantBuilder.new(variant_type_from_string('a*'))
-            for i in range(len(args[0])):
-                (v, rest_format, _) = self._create(format[1:], args[0][i:])
-                builder.add_value(v)
-        if args is not None:
-            args = args[1:]
-        return (builder.end(), rest_format, args)
+LEAF_ACCESSORS = {
+    'b': 'get_boolean',
+    'y': 'get_byte',
+    'n': 'get_int16',
+    'q': 'get_uint16',
+    'i': 'get_int32',
+    'u': 'get_uint32',
+    'x': 'get_int64',
+    't': 'get_uint64',
+    'h': 'get_handle',
+    'd': 'get_double',
+    's': 'get_string',
+    'o': 'get_string',  # object path
+    'g': 'get_string',  # signature
+}
 
 
 class Variant(GLib.Variant):
@@ -239,10 +183,10 @@ class Variant(GLib.Variant):
           GLib.Variant('(asa{sv})', ([], {'foo': GLib.Variant('b', True),
                                           'bar': GLib.Variant('i', 2)}))
         """
+        if not GLib.VariantType.string_is_valid(format_string):
+            raise TypeError("Invalid GVariant format string '%s'", format_string)
         creator = _VariantCreator()
-        (v, rest_format, _) = creator._create(format_string, [value])
-        if rest_format:
-            raise TypeError('invalid remaining format string: "%s"' % rest_format)
+        v = creator._create(format_string, value)
         v.format_string = format_string
         return v
 
@@ -251,7 +195,16 @@ class Variant(GLib.Variant):
         return GLib.Variant.new_tuple(elements)
 
     def __del__(self):
-        self.unref()
+        try:
+            self.unref()
+        except ImportError:
+            # Calling unref will cause gi and gi.repository.GLib to be
+            # imported. However, if the program is exiting, then these
+            # modules have likely been removed from sys.modules and will
+            # raise an exception. Assume that's the case for ImportError
+            # and ignore the exception since everything will be cleaned
+            # up, anyways.
+            pass
 
     def __str__(self):
         return self.print_(True)
@@ -284,35 +237,20 @@ class Variant(GLib.Variant):
     def unpack(self):
         """Decompose a GVariant into a native Python object."""
 
-        LEAF_ACCESSORS = {
-            'b': self.get_boolean,
-            'y': self.get_byte,
-            'n': self.get_int16,
-            'q': self.get_uint16,
-            'i': self.get_int32,
-            'u': self.get_uint32,
-            'x': self.get_int64,
-            't': self.get_uint64,
-            'h': self.get_handle,
-            'd': self.get_double,
-            's': self.get_string,
-            'o': self.get_string,  # object path
-            'g': self.get_string,  # signature
-        }
+        type_string = self.get_type_string()
 
         # simple values
-        la = LEAF_ACCESSORS.get(self.get_type_string())
+        la = LEAF_ACCESSORS.get(type_string)
         if la:
-            return la()
+            return getattr(self, la)()
 
         # tuple
-        if self.get_type_string().startswith('('):
-            res = [self.get_child_value(i).unpack()
-                   for i in range(self.n_children())]
-            return tuple(res)
+        if type_string.startswith('('):
+            return tuple(self.get_child_value(i).unpack()
+                         for i in range(self.n_children()))
 
         # dictionary
-        if self.get_type_string().startswith('a{'):
+        if type_string.startswith('a{'):
             res = {}
             for i in range(self.n_children()):
                 v = self.get_child_value(i)
@@ -320,20 +258,21 @@ class Variant(GLib.Variant):
             return res
 
         # array
-        if self.get_type_string().startswith('a'):
+        if type_string.startswith('a'):
             return [self.get_child_value(i).unpack()
                     for i in range(self.n_children())]
 
         # variant (just unbox transparently)
-        if self.get_type_string().startswith('v'):
+        if type_string.startswith('v'):
             return self.get_variant().unpack()
 
         # maybe
-        if self.get_type_string().startswith('m'):
-            m = self.get_maybe()
-            return m.unpack() if m else None
+        if type_string.startswith('m'):
+            if not self.n_children():
+                return None
+            return self.get_child_value(0).unpack()
 
-        raise NotImplementedError('unsupported GVariant type ' + self.get_type_string())
+        raise NotImplementedError('unsupported GVariant type ' + type_string)
 
     @classmethod
     def split_signature(klass, signature):
@@ -447,15 +386,12 @@ class Variant(GLib.Variant):
         # Array, dict, tuple
         if self.get_type_string().startswith('a') or self.get_type_string().startswith('('):
             return self.n_children() != 0
-        if self.get_type_string() in ['v']:
-            # unpack works recursively, hence bool also works recursively
-            return bool(self.unpack())
-        # Everything else is True
-        return True
+        # unpack works recursively, hence bool also works recursively
+        return bool(self.unpack())
 
     def keys(self):
         if not self.get_type_string().startswith('a{'):
-            return TypeError, 'GVariant type %s is not a dictionary' % self.get_type_string()
+            raise TypeError('GVariant type %s is not a dictionary' % self.get_type_string())
 
         res = []
         for i in range(self.n_children()):
@@ -468,6 +404,7 @@ def get_string(self):
     value, length = GLib.Variant.get_string(self)
     return value
 
+
 setattr(Variant, 'get_string', get_string)
 
 __all__.append('Variant')
@@ -478,6 +415,8 @@ def markup_escape_text(text, length=-1):
         return GLib.markup_escape_text(text.decode('UTF-8'), length)
     else:
         return GLib.markup_escape_text(text, length)
+
+
 __all__.append('markup_escape_text')
 
 
@@ -540,7 +479,7 @@ for name in ['G_MINFLOAT', 'G_MAXFLOAT', 'G_MINDOUBLE', 'G_MAXDOUBLE',
              'G_MAXUINT', 'G_MINLONG', 'G_MAXLONG', 'G_MAXULONG', 'G_MAXSIZE',
              'G_MINSSIZE', 'G_MAXSSIZE', 'G_MINOFFSET', 'G_MAXOFFSET']:
     attr = name.split("_", 1)[-1]
-    globals()[attr] = getattr(_gobject, name)
+    globals()[attr] = getattr(_gi, name)
     __all__.append(attr)
 
 
@@ -549,32 +488,14 @@ class MainLoop(GLib.MainLoop):
     def __new__(cls, context=None):
         return GLib.MainLoop.new(context, False)
 
-    # Retain classic pygobject behaviour of quitting main loops on SIGINT
     def __init__(self, context=None):
-        def _handler(loop):
-            loop.quit()
-            loop._quit_by_sigint = True
-            # We handle signal deletion in __del__, return True so GLib
-            # doesn't do the deletion for us.
-            return True
-
-        if sys.platform != 'win32':
-            # compatibility shim, keep around until we depend on glib 2.36
-            if hasattr(GLib, 'unix_signal_add'):
-                fn = GLib.unix_signal_add
-            else:
-                fn = GLib.unix_signal_add_full
-            self._signal_source = fn(GLib.PRIORITY_DEFAULT, signal.SIGINT, _handler, self)
-
-    def __del__(self):
-        if hasattr(self, '_signal_source'):
-            GLib.source_remove(self._signal_source)
+        pass
 
     def run(self):
-        super(MainLoop, self).run()
-        if hasattr(self, '_quit_by_sigint'):
-            # caught by _main_loop_sigint_handler()
-            raise KeyboardInterrupt
+        with register_sigint_fallback(self.quit):
+            with wakeup_on_signal():
+                super(MainLoop, self).run()
+
 
 MainLoop = override(MainLoop)
 __all__.append('MainLoop')
@@ -585,13 +506,14 @@ class MainContext(GLib.MainContext):
     def iteration(self, may_block=True):
         return super(MainContext, self).iteration(may_block)
 
+
 MainContext = override(MainContext)
 __all__.append('MainContext')
 
 
 class Source(GLib.Source):
     def __new__(cls, *args, **kwargs):
-        # use our custom pyg_source_new() here as g_source_new() is not
+        # use our custom pygi_source_new() here as g_source_new() is not
         # bindable
         source = source_new()
         source.__class__ = cls
@@ -601,9 +523,17 @@ class Source(GLib.Source):
     def __init__(self, *args, **kwargs):
         return super(Source, self).__init__()
 
+    def __del__(self):
+        if hasattr(self, '__pygi_custom_source'):
+            self.destroy()
+            # XXX: We have to unref the underlying source while the Python
+            # wrapper is still valid, so the source can call into the
+            # wrapper methods for the finalized callback.
+            self._clear_boxed()
+
     def set_callback(self, fn, user_data=None):
         if hasattr(self, '__pygi_custom_source'):
-            # use our custom pyg_source_set_callback() if for a GSource object
+            # use our custom pygi_source_set_callback() if for a GSource object
             # with custom functions
             source_set_callback(self, fn, user_data)
         else:
@@ -634,6 +564,7 @@ class Source(GLib.Source):
 
     can_recurse = property(__get_can_recurse, __set_can_recurse)
 
+
 Source = override(Source)
 __all__.append('Source')
 
@@ -649,6 +580,7 @@ class Idle(Source):
         if priority != GLib.PRIORITY_DEFAULT:
             self.set_priority(priority)
 
+
 __all__.append('Idle')
 
 
@@ -662,6 +594,7 @@ class Timeout(Source):
         if priority != GLib.PRIORITY_DEFAULT:
             self.set_priority(priority)
 
+
 __all__.append('Timeout')
 
 
@@ -670,6 +603,7 @@ def idle_add(function, *user_data, **kwargs):
     priority = kwargs.get('priority', GLib.PRIORITY_DEFAULT_IDLE)
     return GLib.idle_add(priority, function, *user_data)
 
+
 __all__.append('idle_add')
 
 
@@ -677,12 +611,14 @@ def timeout_add(interval, function, *user_data, **kwargs):
     priority = kwargs.get('priority', GLib.PRIORITY_DEFAULT)
     return GLib.timeout_add(priority, interval, function, *user_data)
 
+
 __all__.append('timeout_add')
 
 
 def timeout_add_seconds(interval, function, *user_data, **kwargs):
     priority = kwargs.get('priority', GLib.PRIORITY_DEFAULT)
     return GLib.timeout_add_seconds(priority, interval, function, *user_data)
+
 
 __all__.append('timeout_add_seconds')
 
@@ -741,6 +677,7 @@ def _io_add_watch_get_args(channel, priority_, condition, *cb_and_user_data, **k
 
     return real_channel, priority_, condition, func_fdtransform, user_data
 
+
 __all__.append('_io_add_watch_get_args')
 
 
@@ -748,6 +685,7 @@ def io_add_watch(*args, **kwargs):
     """io_add_watch(channel, priority, condition, func, *user_data) -> event_source_id"""
     channel, priority, condition, func, user_data = _io_add_watch_get_args(*args, **kwargs)
     return GLib.io_add_watch(channel, priority, condition, func, *user_data)
+
 
 __all__.append('io_add_watch')
 
@@ -830,6 +768,7 @@ class IOChannel(GLib.IOChannel):
     # Python 2.x compatibility
     next = __next__
 
+
 IOChannel = override(IOChannel)
 __all__.append('IOChannel')
 
@@ -843,6 +782,7 @@ class PollFD(GLib.PollFD):
     def __init__(self, fd, events):
         self.fd = fd
         self.events = events
+
 
 PollFD = override(PollFD)
 __all__.append('PollFD')
@@ -887,9 +827,10 @@ def _child_watch_add_get_args(priority_or_pid, pid_or_callback, *args, **kwargs)
     if 'data' in kwargs:
         if user_data:
             raise TypeError('got multiple values for "data" argument')
-        user_data = [kwargs['data']]
+        user_data = (kwargs['data'],)
 
     return priority, pid, callback, user_data
+
 
 # we need this to be accessible for unit testing
 __all__.append('_child_watch_add_get_args')
@@ -900,11 +841,13 @@ def child_watch_add(*args, **kwargs):
     priority, pid, function, data = _child_watch_add_get_args(*args, **kwargs)
     return GLib.child_watch_add(priority, pid, function, *data)
 
+
 __all__.append('child_watch_add')
 
 
 def get_current_time():
     return GLib.get_real_time() * 0.000001
+
 
 get_current_time = deprecated(get_current_time, 'GLib.get_real_time()')
 
@@ -916,17 +859,14 @@ __all__.append('get_current_time')
 def filename_from_utf8(utf8string, len=-1):
     return GLib.filename_from_utf8(utf8string, len)[0]
 
+
 __all__.append('filename_from_utf8')
 
 
-# backwards compatible API for renamed function
-if not hasattr(GLib, 'unix_signal_add_full'):
-    def add_full_compat(*args):
-        warnings.warn('GLib.unix_signal_add_full() was renamed to GLib.unix_signal_add()',
-                      PyGIDeprecationWarning)
-        return GLib.unix_signal_add(*args)
-
-    GLib.unix_signal_add_full = add_full_compat
+if hasattr(GLib, "unix_signal_add"):
+    unix_signal_add_full = GLib.unix_signal_add
+    __all__.append('unix_signal_add_full')
+    deprecated_attr("GLib", "unix_signal_add_full", "GLib.unix_signal_add")
 
 
 # obsolete constants for backwards compatibility

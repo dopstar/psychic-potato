@@ -33,14 +33,7 @@ from optparse import OptParseError, OptionError, OptionValueError, \
     BadOptionError, OptionConflictError
 from .module import get_introspection_module
 
-if sys.version_info >= (3, 0):
-    _basestring = str
-    _bytes = lambda s: s.encode()
-else:
-    _basestring = basestring
-    _bytes = str
-
-from gi._gi import _glib
+from gi import _gi
 from gi._error import GError
 GLib = get_introspection_module('GLib')
 
@@ -137,10 +130,13 @@ class Option(optparse.Option):
             flags |= GLib.OptionFlags.FILENAME
 
         for (long_name, short_name) in zip(self._long_opts, self._short_opts):
-            yield (long_name[2:], _bytes(short_name[1]), flags, self.help, self.metavar)
+            short_bytes = short_name[1]
+            if not isinstance(short_bytes, bytes):
+                short_bytes = short_bytes.encode("utf-8")
+            yield (long_name[2:], short_bytes, flags, self.help, self.metavar)
 
         for long_name in self._long_opts[len(self._short_opts):]:
-            yield (long_name[2:], _bytes('\0'), flags, self.help, self.metavar)
+            yield (long_name[2:], b'\0', flags, self.help, self.metavar)
 
 
 class OptionGroup(optparse.OptionGroup):
@@ -209,8 +205,8 @@ class OptionGroup(optparse.OptionGroup):
                 gerror.message = str(error)
                 raise gerror
 
-        group = _glib.OptionGroup(self.name, self.description,
-                                  self.help_description, callback)
+        group = _gi.OptionGroup(self.name, self.description,
+                                self.help_description, callback)
         if self.translation_domain:
             group.set_translation_domain(self.translation_domain)
 
@@ -233,7 +229,7 @@ class OptionGroup(optparse.OptionGroup):
     def set_values_to_defaults(self):
         for option in self.option_list:
             default = self.defaults.get(option.dest)
-            if isinstance(default, _basestring):
+            if isinstance(default, str):
                 opt_str = option.get_opt_string()
                 self.defaults[option.dest] = option.check_value(
                     opt_str, default)
@@ -285,12 +281,12 @@ class OptionParser(optparse.OptionParser):
             parameter_string = self.usage + " - " + self.description
         else:
             parameter_string = self.usage
-        context = _glib.OptionContext(parameter_string)
+        context = _gi.OptionContext(parameter_string)
         context.set_help_enabled(self.help_enabled)
         context.set_ignore_unknown_options(self.ignore_unknown_options)
 
         for option_group in self.option_groups:
-            if isinstance(option_group, _glib.OptionGroup):
+            if isinstance(option_group, _gi.OptionGroup):
                 g_group = option_group
             else:
                 g_group = option_group.get_option_group(self)
@@ -303,7 +299,7 @@ class OptionParser(optparse.OptionParser):
                 opt = self._short_opt[option_name]
             opt.process(option_name, option_value, values, self)
 
-        main_group = _glib.OptionGroup(None, None, None, callback)
+        main_group = _gi.OptionGroup(None, None, None, callback)
         main_entries = []
         for option in self.option_list:
             main_entries.extend(option._to_goptionentries())
@@ -313,7 +309,7 @@ class OptionParser(optparse.OptionParser):
         return context
 
     def add_option_group(self, *args, **kwargs):
-        if isinstance(args[0], _basestring):
+        if isinstance(args[0], str):
             optparse.OptionParser.add_option_group(self,
                                                    OptionGroup(self, *args, **kwargs))
             return
@@ -323,7 +319,7 @@ class OptionParser(optparse.OptionParser):
                     args[0].parser = self
                 if args[0].parser is not self:
                     raise ValueError("invalid OptionGroup (wrong parser)")
-            if isinstance(args[0], _glib.OptionGroup):
+            if isinstance(args[0], _gi.OptionGroup):
                 self.option_groups.append(args[0])
                 return
         optparse.OptionParser.add_option_group(self, *args, **kwargs)
@@ -344,7 +340,6 @@ class OptionParser(optparse.OptionParser):
         rargs[:] = context.parse([sys.argv[0]] + rargs)[1:]
 
     def parse_args(self, args=None, values=None):
-        old_args = args or []
         try:
             options, args = optparse.OptionParser.parse_args(
                 self, args, values)
@@ -365,7 +360,7 @@ class OptionParser(optparse.OptionParser):
             for key, value in group.values.__dict__.items():
                 options.ensure_value(key, value)
 
-        args = args[2:-len(old_args)]
         return options, args
+
 
 make_option = Option
