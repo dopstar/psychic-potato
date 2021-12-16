@@ -13,7 +13,7 @@ from .core import NtlmCompatibility, get_ntlm_credentials, noop
 from .dance import HttpNtlmContext
 
 
-IO_WAIT_TIMEOUT = 0.1
+IO_WAIT_TIMEOUT = 0.05
 
 
 logger = logging.getLogger(__name__)
