@@ -1,5 +1,9 @@
 <!--next-version-placeholder-->
 
+## v1.3.4 (2021-12-16)
+### Fix
+* **Contributors:** Removed contributor ([`6f6b4c1`](https://github.com/dopstar/psychic-potato/commit/6f6b4c1cf3d98685124d92cbe2ac0539d7f08616))
+
 ## v1.3.3 (2021-12-16)
 ### Fix
 * **Changelog:** Added placeholder ([`b95c868`](https://github.com/dopstar/psychic-potato/commit/b95c868f1b42ff77f353e2fb12788196bc7a7eff))
