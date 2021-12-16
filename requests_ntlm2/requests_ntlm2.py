@@ -158,5 +158,5 @@ class HttpNtlmAuth(AuthBase):
 
     def extract_username_and_password(self):
         if self.domain:
-            return "{}\\{}".format(self.domain, self.username), self.password
+            return r"{}\{}".format(self.domain, self.username), self.password
         return self.username, self.password
