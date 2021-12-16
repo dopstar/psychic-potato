@@ -321,4 +321,5 @@ def fix_target_info(challenge_msg):
 
 
 def noop():
+    logger.info('this is a noop operation')
     pass
