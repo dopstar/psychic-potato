@@ -154,6 +154,7 @@ class HttpNtlmContext(ntlm_auth.ntlm.NtlmContext):
         return None
 
     def get_authenticate_header(self):
+        """gets the authentication header"""
         authenticate_message = self.create_authenticate_message()
         authenticate_message = authenticate_message.decode("ascii")
         return u"{auth_type} {authenticate_message}".format(
