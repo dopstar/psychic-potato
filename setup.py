@@ -17,7 +17,7 @@ with open("README.md") as fd:
 
 
 requirements = [
-    "aenum",
+    "aenum>=1",
     "requests>=2.0.0",
     "ntlm-auth>=1.0.2",
     "cryptography>=1.3",
